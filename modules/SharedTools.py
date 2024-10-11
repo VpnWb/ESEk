@@ -27,12 +27,19 @@ GET_EBID = 'document.getElementById'
 GET_EBTN = 'document.getElementByTagName'
 GET_EBAV = 'getElementByAttrValue'
 CLICK_WITH_BOOL = 'clickWithBool'
-PARSE_10MINUTEMAIL_INBOX = 'parse_10minutemail_inbox()'
 DEFINE_GET_EBAV_FUNCTION = """
-function getElementByAttrValue(tagName, attrName, attrValue) {
+function getElementByAttrValue(tagName, attrName, attrValue, index=1) {
+    let eindex = 0
+    let elements = []
     for (let element of document.getElementsByTagName(tagName)) {
-        if(element.getAttribute(attrName) === attrValue)
-            return element } }"""
+        if(element.getAttribute(attrName) === attrValue) {
+            eindex += 1
+            if (index == -1)
+                elements.push(element)
+            else if (index == eindex)
+                return element } } 
+    if (index == -1)    
+        return elements }"""
 DEFINE_CLICK_WITH_BOOL_FUNCTION = """
 function clickWithBool(object) {
     try {
@@ -40,36 +47,6 @@ function clickWithBool(object) {
         return true }
     catch {
         return false } }"""
-DEFINE_PARSE_10MINUTEMAIL_INBOX_FUNCTION = """function parse_10minutemail_inbox() {
-    updatemailbox()
-    let mails = Array.from(document.getElementsByTagName('tr')).slice(1)
-    let inbox = []
-    for(let i=0; i < mails.length; i++) {
-        let id = mails[i].children[0].children[0].href
-        let from = mails[i].children[0].innerText
-        let subject = mails[i].children[1].innerText
-        inbox.push([id, from, subject]) }
-    return inbox }"""
-PARSE_GUERRILLAMAIL_INBOX = """
-var email_list = document.getElementById('email_list').children
-var inbox = []
-for(var i=0; i < email_list.length-1; i++) {
-    var mail = email_list[i].children
-    var from = mail[1].innerText
-    var subject = mail[2].innerText
-    var mail_id = mail[0].children[0].value
-    inbox.push([mail_id, from, subject])
-}
-return inbox
-"""
-GET_GUERRILLAMAIL_DOMAINS = """
-var domains_options = document.getElementById('gm-host-select').options
-var domains = [] 
-for(var i=0; i < domains_options.length-1; i++) {
-    domains.push(domains_options[i].value)
-}
-return domains
-"""
 
 colorama.init()
 
@@ -245,11 +222,11 @@ def parseToken(email_obj, driver=None, eset_business=False, delay=DEFAULT_DELAY,
         if email_obj.class_name == '1secmail':
             json = email_obj.read_email()
             if json != []:
-                message = json[-1]
-                if eset_business and message['subject'].find('ESET PROTECT Hub') != -1:
-                    activated_href = email_obj.get_message(message['id'])['body']
-                elif message['from'].find('product.eset.com') != -1:
-                    activated_href = email_obj.get_message(message['id'])['body']
+                for message in json:
+                    if eset_business and message['subject'].find('ESET PROTECT Hub') != -1:
+                        activated_href = email_obj.get_message(message['id'])['body']
+                    elif message['from'].find('product.eset.com') != -1:
+                        activated_href = email_obj.get_message(message['id'])['body']
         elif email_obj.class_name == 'developermail':
             messages = email_obj.get_messages()
             if messages is not None:
@@ -258,21 +235,14 @@ def parseToken(email_obj, driver=None, eset_business=False, delay=DEFAULT_DELAY,
                     activated_href = message['body']
                 elif message['from'].find('product.eset.com') != -1:
                     activated_href = message['body']
-        elif email_obj.class_name == 'hi2in':
-            email_obj.open_inbox()
-            try:
-                if eset_business:
-                    activated_href = driver.find_element('xpath', "//a[starts-with(@href, 'https://protecthub.eset.com')]").get_attribute('href')
-                else:
-                    activated_href = driver.find_element('xpath', "//a[starts-with(@href, 'https://login.eset.com')]").get_attribute('href')
-            except:
-                pass
-        elif email_obj.class_name in ['guerrillamail', '10minutemail']:
+        elif email_obj.class_name in ['guerrillamail', 'mailticking']:
             inbox = email_obj.parse_inbox()
             for mail in inbox:
                 mail_id, mail_from, mail_subject = mail
-                if mail_from.find('product.eset.com') != -1 or mail_subject.find('ESET PROTECT Hub') != -1:
+                if mail_from.find('product.eset.com') != -1 or mail_from.find('ESET HOME') != -1 or mail_subject.find('ESET PROTECT Hub') != -1:
                     email_obj.open_mail(mail_id)
+                    if email_obj.class_name == 'mailticking':
+                        time.sleep(1.5)
                     try:
                         if eset_business:
                             activated_href = driver.find_element('xpath', "//a[starts-with(@href, 'https://protecthub.eset.com')]").get_attribute('href') 
@@ -280,15 +250,6 @@ def parseToken(email_obj, driver=None, eset_business=False, delay=DEFAULT_DELAY,
                             activated_href = driver.find_element('xpath', "//a[starts-with(@href, 'https://login.eset.com')]").get_attribute('href')
                     except:
                         pass
-        elif email_obj.class_name == 'tempmail':
-            email_obj.auth()
-            messages = email_obj.get_messages()
-            try:
-                for message in messages:
-                    if message["from"].find("product.eset.com") != -1 or message["subject"].find('ESET PROTECT Hub') != -1:
-                        activated_href = email_obj.get_message(message["_id"])["bodyHtml"]
-            except:
-                pass
         if activated_href is not None:
             if eset_business:
                 match = re.search(r'activation\/[a-zA-Z0-9-]+', activated_href)
@@ -314,6 +275,15 @@ def parseEPHKey(email_obj, driver=None, delay=DEFAULT_DELAY, max_iter=DEFAULT_MA
                     if message['subject'].find('Thank you for purchasing') != -1:
                         license_data = message['body']
                         break
+        if email_obj.class_name == 'mailticking':
+            inbox = email_obj.parse_inbox()
+            for mail in inbox:
+                mail_id, mail_from, mail_subject = mail
+                if mail_subject.find('Thank you for purchasing') != -1:
+                    email_obj.open_mail(mail_id)
+                    time.sleep(3)
+                    license_data = email_obj.driver.page_source
+                    break
         if license_data is not None:
             license_data = str(license_data)
             license_key = re.search(r'([A-Z0-9]){4}-([A-Z0-9]){4}-([A-Z0-9]){4}-([A-Z0-9]){4}-([A-Z0-9]){4}', license_data).group()
@@ -322,3 +292,44 @@ def parseEPHKey(email_obj, driver=None, delay=DEFAULT_DELAY, max_iter=DEFAULT_MA
             return license_key, license_out_date, license_id
         time.sleep(delay)
     raise RuntimeError('ESET ProtectHub data waiting time has been exceeded!!!')
+
+def parseVPNCodes(email_obj, driver=None, delay=DEFAULT_DELAY, max_iter=DEFAULT_MAX_ITER):
+    for _ in range(max_iter):
+        data = None
+        if email_obj.class_name == '1secmail':
+            json = email_obj.read_email()
+            if json != []:
+                for message in json:
+                    if message['subject'].find('VPN - Setup instructions') != -1:
+                        data = email_obj.get_message(message['id'])['body']
+        elif email_obj.class_name == 'developermail':
+            messages = email_obj.get_messages()
+            if messages is not None:
+                for message in messages:
+                    if message['subject'].find('VPN - Setup instructions') != -1:
+                        data = message['body']
+        elif email_obj.class_name in ['guerrillamail', 'mailticking']:
+            inbox = email_obj.parse_inbox()
+            for mail in inbox:
+                mail_id, mail_from, mail_subject = mail
+                if mail_subject.find('VPN - Setup instructions') != -1:
+                    email_obj.open_mail(mail_id)
+                    if email_obj.class_name == 'mailticking':
+                        time.sleep(1.5)
+                        try:
+                            data = str(driver.execute_script(f'return {GET_EBCN}("email-content")[0].innerHTML'))
+                        except:
+                            pass
+                    elif email_obj.class_name == 'guerrillamail':
+                        try:
+                            data = str(driver.execute_script(f'return {GET_EBCN}("email_body")[0].innerHTML'))
+                        except:
+                            pass
+                    else:
+                        data = driver.page_source
+        if data is not None:
+            match = re.findall(r'[A-Z0-9]{10}', data)
+            if match is not None and len(match) == 10:
+                return match
+        time.sleep(delay)
+    raise RuntimeError('VPN Codes retrieval error, try again later or change the Email API!!!')
